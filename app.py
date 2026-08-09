@@ -640,8 +640,6 @@ def home():
 
 def pdf_to_images(path):
 
-    pages = []
-
     document = fitz.open(path)
 
     try:
@@ -649,7 +647,7 @@ def pdf_to_images(path):
         for page in document:
 
             pixmap = page.get_pixmap(
-                matrix=fitz.Matrix(2, 2),
+                matrix=fitz.Matrix(1.5, 1.5),
                 alpha=False
             )
 
@@ -662,14 +660,11 @@ def pdf_to_images(path):
                 pixmap.samples
             )
 
-            pages.append(image)
+            yield image
 
     finally:
 
         document.close()
-
-    return pages
-
 
 def load_input_images(path):
 
