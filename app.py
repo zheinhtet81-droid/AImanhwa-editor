@@ -505,11 +505,16 @@ form.addEventListener(
 
             if (!response.ok) {
 
-                throw new Error(
-                    result.error ||
-                    "Server Error"
-                );
-            }
+    const raw =
+        await response.text();
+
+    throw new Error(
+        "HTTP " +
+        response.status +
+        "\n\n" +
+        raw.substring(0, 3000)
+    );
+}
 
             if (!result.success) {
 
