@@ -728,8 +728,7 @@ def login():
 
     if request.method == "POST":
 
-        username =
-            request.form.get(
+        username = request.form.get(
                 "username",
                 ""
             ).strip()
