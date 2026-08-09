@@ -18,6 +18,7 @@ from PIL import Image
 from modules.ocr import detect_text
 from modules.translator import (
     load_translation,
+    load_translation_file,
     match_translation
 )
 from modules.renderer import replace_text
@@ -44,7 +45,6 @@ PASSWORD = os.environ.get(
 
 LOGIN_HTML = r"""
 <!DOCTYPE html>
-
 <html lang="my">
 
 <head>
@@ -77,9 +77,7 @@ body {
     background: #0f172a;
     color: white;
 
-    font-family:
-        Arial,
-        sans-serif;
+    font-family: Arial, sans-serif;
 }
 
 .box {
@@ -202,7 +200,6 @@ button {
 
 HTML = r"""
 <!DOCTYPE html>
-
 <html lang="my">
 
 <head>
@@ -214,9 +211,7 @@ HTML = r"""
     content="width=device-width, initial-scale=1.0"
 >
 
-<title>
-AI Manhwa Myanmar Translator
-</title>
+<title>AI Manhwa Myanmar Translator</title>
 
 <style>
 
@@ -225,22 +220,17 @@ AI Manhwa Myanmar Translator
 }
 
 body {
-
     margin: 0;
-
     padding: 20px;
 
     background: #0f172a;
 
     color: #f8fafc;
 
-    font-family:
-        Arial,
-        sans-serif;
+    font-family: Arial, sans-serif;
 }
 
 .container {
-
     max-width: 850px;
 
     margin: auto;
@@ -255,14 +245,12 @@ body {
 }
 
 h1 {
-
     text-align: center;
 
     color: #38bdf8;
 }
 
 .logout {
-
     display: block;
 
     text-align: right;
@@ -275,7 +263,6 @@ h1 {
 }
 
 label {
-
     display: block;
 
     margin-top: 18px;
@@ -287,7 +274,6 @@ label {
 
 input,
 textarea {
-
     width: 100%;
 
     padding: 12px;
@@ -302,14 +288,12 @@ textarea {
 }
 
 textarea {
-
-    min-height: 180px;
+    min-height: 160px;
 
     resize: vertical;
 }
 
 button {
-
     width: 100%;
 
     padding: 14px;
@@ -332,14 +316,20 @@ button {
 }
 
 button:disabled {
-
     opacity: 0.5;
 
     cursor: not-allowed;
 }
 
-#status {
+.help {
+    margin-top: 8px;
 
+    color: #94a3b8;
+
+    font-size: 14px;
+}
+
+#status {
     margin-top: 20px;
 
     padding: 15px;
@@ -354,7 +344,6 @@ button:disabled {
 }
 
 .download {
-
     display: block;
 
     margin-top: 20px;
@@ -375,7 +364,6 @@ button:disabled {
 }
 
 .hidden {
-
     display: none;
 }
 
@@ -398,13 +386,15 @@ button:disabled {
 🎨 AI Manhwa Myanmar Translator
 </h1>
 
+
 <form
     id="form"
     enctype="multipart/form-data"
 >
 
+
 <label>
-📂 Manhwa PDF / Image
+📕 Manhwa PDF / Image
 </label>
 
 <input
@@ -414,14 +404,31 @@ button:disabled {
     required
 >
 
+
 <label>
-🇲🇲 Myanmar Translation
+📄 Translation File
+</label>
+
+<input
+    type="file"
+    name="translation_file"
+    accept=".txt,.docx,.srt,.vtt,.csv"
+>
+
+<div class="help">
+TXT / DOCX / SRT / VTT / CSV support.
+</div>
+
+
+<label>
+🇲🇲 Or paste translation text
 </label>
 
 <textarea
     name="translation"
-    placeholder="စာကြောင်းတစ်ကြောင်းစီ ထည့်ပါ..."
+    placeholder="Translation file မသုံးရင် ဒီနေရာမှာ စာကြောင်းတစ်ကြောင်းစီ ထည့်နိုင်ပါတယ်..."
 ></textarea>
+
 
 <button
     id="button"
@@ -432,9 +439,11 @@ button:disabled {
 
 </form>
 
+
 <div id="status">
 Ready...
 </div>
+
 
 <a
     id="download"
@@ -442,6 +451,7 @@ Ready...
 >
 📥 Download Translated ZIP
 </a>
+
 
 </div>
 
@@ -490,18 +500,16 @@ form.addEventListener(
                     }
                 );
 
-            if (!response.ok) {
-
-                const errorText =
-                    await response.text();
-
-                throw new Error(
-                    errorText
-                );
-            }
-
             const result =
                 await response.json();
+
+            if (!response.ok) {
+
+                throw new Error(
+                    result.error ||
+                    "Server Error"
+                );
+            }
 
             if (!result.success) {
 
@@ -556,6 +564,7 @@ def login_required(function):
         if not session.get(
             "logged_in"
         ):
+
             return redirect(
                 url_for("login")
             )
@@ -599,7 +608,10 @@ def login():
                 url_for("home")
             )
 
-        error = "Username သို့မဟုတ် Password မှားနေပါတယ်"
+        error = (
+            "Username သို့မဟုတ် "
+            "Password မှားနေပါတယ်"
+        )
 
     return render_template_string(
         LOGIN_HTML,
@@ -683,16 +695,21 @@ def process():
         "file"
     )
 
+    translation_upload = request.files.get(
+        "translation_file"
+    )
+
     translation_text = request.form.get(
         "translation",
         ""
     )
 
+
     if uploaded is None:
 
         return {
             "success": False,
-            "error": "File မတွေ့ပါ"
+            "error": "Manhwa file မတွေ့ပါ"
         }, 400
 
 
@@ -700,13 +717,13 @@ def process():
 
         return {
             "success": False,
-            "error": "File name မရှိပါ"
+            "error": "Manhwa file name မရှိပါ"
         }, 400
 
 
     filename = uploaded.filename.lower()
 
-    allowed = (
+    allowed_images = (
         ".pdf",
         ".png",
         ".jpg",
@@ -714,14 +731,16 @@ def process():
         ".webp"
     )
 
+
     if not filename.endswith(
-        allowed
+        allowed_images
     ):
 
         return {
             "success": False,
             "error": (
-                "PDF/JPG/PNG/WEBP ပဲ တင်ပါ"
+                "PDF/JPG/PNG/WEBP ပဲ "
+                "တင်ပါ"
             )
         }, 400
 
@@ -729,6 +748,7 @@ def process():
     temp_dir = tempfile.mkdtemp(
         prefix="manhwa_"
     )
+
 
     input_path = os.path.join(
         temp_dir,
@@ -744,9 +764,11 @@ def process():
             input_path
         )
 
+
         pages = load_input_images(
             input_path
         )
+
 
         if not pages:
 
@@ -754,11 +776,58 @@ def process():
                 "Page မတွေ့ပါ"
             )
 
-        translations = (
-            load_translation(
-                translation_text
+
+        translations = []
+
+
+        # Translation file has priority.
+        if (
+            translation_upload is not None
+            and translation_upload.filename
+        ):
+
+            translation_filename = (
+                translation_upload.filename
             )
-        )
+
+            translation_path = os.path.join(
+                temp_dir,
+                os.path.basename(
+                    translation_filename
+                )
+            )
+
+
+            translation_upload.save(
+                translation_path
+            )
+
+
+            translations = (
+                load_translation_file(
+                    translation_path
+                )
+            )
+
+
+        # If no translation file,
+        # use pasted text.
+        if not translations:
+
+            translations = (
+                load_translation(
+                    translation_text
+                )
+            )
+
+
+        if not translations:
+
+            raise ValueError(
+                "Translation file သို့မဟုတ် "
+                "translation text ထည့်ပါ"
+            )
+
 
         output_pages = []
 
@@ -775,16 +844,19 @@ def process():
                 boxes
             )
 
+
             matched = match_translation(
                 boxes,
                 translations
             )
+
 
             output = replace_text(
                 page,
                 matched,
                 translations
             )
+
 
             output_pages.append(
                 output
@@ -817,9 +889,11 @@ def process():
             {}
         )
 
+
         token = os.path.basename(
             temp_dir
         )
+
 
         app.config["OUTPUTS"][token] = (
             output_path
@@ -833,7 +907,9 @@ def process():
             "message": (
                 "✅ Processing ပြီးပါပြီ!\n\n"
                 f"Pages: {len(output_pages)}\n"
-                f"Text boxes: {total_boxes}\n\n"
+                f"Text boxes: {total_boxes}\n"
+                f"Translation lines: "
+                f"{len(translations)}\n\n"
                 "ZIP download လုပ်နိုင်ပါပြီ။"
             ),
 
@@ -863,6 +939,7 @@ def download(token):
         "OUTPUTS",
         {}
     )
+
 
     path = outputs.get(
         token
@@ -907,6 +984,7 @@ if __name__ == "__main__":
             "10000"
         )
     )
+
 
     app.run(
         host="0.0.0.0",
