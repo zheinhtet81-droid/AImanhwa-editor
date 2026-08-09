@@ -1,5 +1,7 @@
 import os
+import io
 import tempfile
+import zipfile
 from functools import wraps
 
 from flask import (
@@ -9,20 +11,15 @@ from flask import (
     send_file,
     session,
     redirect,
-    url_for
+    url_for,
+    jsonify
 )
 
 import fitz
 from PIL import Image
 
 from modules.ocr import detect_text
-from modules.translator import (
-    load_translation,
-    load_translation_file,
-    match_translation
-)
 from modules.renderer import replace_text
-from modules.exporter import create_zip
 
 
 app = Flask(__name__)
@@ -43,10 +40,13 @@ PASSWORD = os.environ.get(
 )
 
 
+# =========================================================
+# LOGIN PAGE
+# =========================================================
+
 LOGIN_HTML = r"""
 <!DOCTYPE html>
-<html lang="my">
-
+<html>
 <head>
 
 <meta charset="UTF-8">
@@ -56,7 +56,7 @@ LOGIN_HTML = r"""
     content="width=device-width, initial-scale=1.0"
 >
 
-<title>Private Login</title>
+<title>Manhwa Translator Login</title>
 
 <style>
 
@@ -66,50 +66,49 @@ LOGIN_HTML = r"""
 
 body {
     margin: 0;
-    padding: 20px;
-
     min-height: 100vh;
+    background: #111827;
+    color: white;
+    font-family: Arial, sans-serif;
 
     display: flex;
-    align-items: center;
     justify-content: center;
+    align-items: center;
 
-    background: #0f172a;
-    color: white;
-
-    font-family: Arial, sans-serif;
+    padding: 20px;
 }
 
-.box {
+.card {
     width: 100%;
     max-width: 420px;
 
+    background: #1f2937;
+
+    border-radius: 18px;
+
     padding: 25px;
 
-    background: #1e293b;
-
-    border-radius: 16px;
-
-    border: 1px solid #334155;
+    box-shadow:
+        0 15px 40px rgba(0,0,0,.35);
 }
 
 h1 {
+    margin-top: 0;
     text-align: center;
-    color: #38bdf8;
 }
 
 input {
     width: 100%;
 
-    padding: 13px;
+    padding: 14px;
 
-    margin-top: 10px;
+    margin-top: 12px;
 
-    border-radius: 8px;
+    border-radius: 10px;
 
-    border: 1px solid #475569;
+    border: 1px solid #374151;
 
-    background: #0f172a;
+    background: #111827;
 
     color: white;
 
@@ -119,15 +118,15 @@ input {
 button {
     width: 100%;
 
-    padding: 13px;
-
     margin-top: 18px;
+
+    padding: 14px;
 
     border: 0;
 
-    border-radius: 8px;
+    border-radius: 10px;
 
-    background: #0284c7;
+    background: #2563eb;
 
     color: white;
 
@@ -139,13 +138,13 @@ button {
 .error {
     margin-top: 15px;
 
-    padding: 10px;
+    padding: 12px;
+
+    border-radius: 10px;
 
     background: #7f1d1d;
 
-    border-radius: 8px;
-
-    text-align: center;
+    color: #fecaca;
 }
 
 </style>
@@ -154,9 +153,9 @@ button {
 
 <body>
 
-<div class="box">
+<div class="card">
 
-<h1>🔐 Private App</h1>
+<h1>🔐 Manhwa Translator</h1>
 
 <form method="POST">
 
@@ -193,14 +192,17 @@ button {
 </div>
 
 </body>
-
 </html>
 """
 
 
+# =========================================================
+# MAIN PAGE
+# =========================================================
+
 HTML = r"""
 <!DOCTYPE html>
-<html lang="my">
+<html>
 
 <head>
 
@@ -211,7 +213,7 @@ HTML = r"""
     content="width=device-width, initial-scale=1.0"
 >
 
-<title>AI Manhwa Myanmar Translator</title>
+<title>Manhwa Translator</title>
 
 <style>
 
@@ -220,49 +222,64 @@ HTML = r"""
 }
 
 body {
+
     margin: 0;
-    padding: 20px;
+
+    min-height: 100vh;
 
     background: #0f172a;
 
-    color: #f8fafc;
+    color: white;
 
-    font-family: Arial, sans-serif;
+    font-family:
+        Arial,
+        "Noto Sans Myanmar",
+        sans-serif;
+
+    padding: 20px;
 }
 
 .container {
-    max-width: 850px;
+
+    width: 100%;
+
+    max-width: 650px;
 
     margin: auto;
+}
+
+.card {
 
     background: #1e293b;
 
-    padding: 25px;
+    border-radius: 18px;
 
-    border-radius: 16px;
+    padding: 22px;
 
-    border: 1px solid #334155;
+    box-shadow:
+        0 15px 40px rgba(0,0,0,.3);
 }
 
 h1 {
+
     text-align: center;
 
-    color: #38bdf8;
+    margin-top: 0;
+
+    margin-bottom: 8px;
 }
 
-.logout {
-    display: block;
+.subtitle {
 
-    text-align: right;
+    text-align: center;
 
-    color: #f87171;
+    color: #94a3b8;
 
-    text-decoration: none;
-
-    margin-bottom: 15px;
+    margin-bottom: 25px;
 }
 
 label {
+
     display: block;
 
     margin-top: 18px;
@@ -272,85 +289,109 @@ label {
     font-weight: bold;
 }
 
-input,
-textarea {
+input[type="file"] {
+
     width: 100%;
 
     padding: 12px;
 
-    border-radius: 8px;
-
-    border: 1px solid #475569;
+    border-radius: 10px;
 
     background: #0f172a;
 
     color: white;
+
+    border: 1px solid #334155;
 }
 
 textarea {
+
+    width: 100%;
+
     min-height: 160px;
 
+    padding: 12px;
+
+    border-radius: 10px;
+
+    background: #0f172a;
+
+    color: white;
+
+    border: 1px solid #334155;
+
     resize: vertical;
+
+    font-size: 15px;
 }
 
 button {
+
     width: 100%;
 
-    padding: 14px;
+    padding: 15px;
 
     margin-top: 20px;
 
     border: 0;
 
-    border-radius: 8px;
+    border-radius: 12px;
 
-    background: #0284c7;
+    background: #2563eb;
 
     color: white;
 
-    font-size: 16px;
+    font-size: 17px;
 
     font-weight: bold;
-
-    cursor: pointer;
 }
 
 button:disabled {
-    opacity: 0.5;
 
-    cursor: not-allowed;
+    opacity: .55;
 }
 
-.help {
-    margin-top: 8px;
+.logout {
 
-    color: #94a3b8;
+    display: block;
 
-    font-size: 14px;
+    text-align: right;
+
+    color: #fca5a5;
+
+    text-decoration: none;
+
+    margin-bottom: 15px;
 }
 
 #status {
-    margin-top: 20px;
-
-    padding: 15px;
-
-    background: #020617;
-
-    border-radius: 8px;
 
     white-space: pre-wrap;
-
-    min-height: 80px;
-}
-
-.download {
-    display: block;
 
     margin-top: 20px;
 
     padding: 14px;
 
+    border-radius: 10px;
+
+    background: #0f172a;
+
+    color: #cbd5e1;
+
+    display: none;
+}
+
+.download {
+
+    display: block;
+
+    margin-top: 15px;
+
+    padding: 14px;
+
     text-align: center;
+
+    border-radius: 10px;
 
     background: #16a34a;
 
@@ -358,18 +399,35 @@ button:disabled {
 
     text-decoration: none;
 
-    border-radius: 8px;
-
     font-weight: bold;
 }
 
 .hidden {
-    display: none;
+
+    display: none !important;
+}
+
+.info {
+
+    margin-top: 15px;
+
+    padding: 12px;
+
+    border-radius: 10px;
+
+    background: #172554;
+
+    color: #bfdbfe;
+
+    font-size: 14px;
+
+    line-height: 1.5;
 }
 
 </style>
 
 </head>
+
 
 <body>
 
@@ -382,9 +440,14 @@ button:disabled {
     Logout
 </a>
 
-<h1>
-🎨 AI Manhwa Myanmar Translator
-</h1>
+
+<div class="card">
+
+<h1>📖 Manhwa Translator</h1>
+
+<div class="subtitle">
+    Myanmar Translation Tool
+</div>
 
 
 <form
@@ -394,7 +457,7 @@ button:disabled {
 
 
 <label>
-📕 Manhwa PDF / Image
+    📚 Manhwa PDF / Image
 </label>
 
 <input
@@ -406,27 +469,36 @@ button:disabled {
 
 
 <label>
-📄 Translation File
+    📝 Translation File
 </label>
 
 <input
     type="file"
     name="translation_file"
-    accept=".txt,.docx,.srt,.vtt,.csv"
+    accept=".txt,.docx"
 >
 
-<div class="help">
-TXT / DOCX / SRT / VTT / CSV support.
+
+<div class="info">
+
+DOCX / TXT သုံးနိုင်ပါတယ်။<br>
+
+DOCX ထဲမှာ translation စာကြောင်းတွေကို
+တစ်ကြောင်းစီထားပါ။<br>
+
+Translation file မတင်ချင်ရင်
+အောက်က box ထဲ တိုက်ရိုက်ရေးနိုင်ပါတယ်။
+
 </div>
 
 
 <label>
-🇲🇲 Or paste translation text
+    ✍️ Translation Text
 </label>
 
 <textarea
     name="translation"
-    placeholder="Translation file မသုံးရင် ဒီနေရာမှာ စာကြောင်းတစ်ကြောင်းစီ ထည့်နိုင်ပါတယ်..."
+    placeholder="မြန်မာဘာသာပြန်စာကို တစ်ကြောင်းစီရေးပါ..."
 ></textarea>
 
 
@@ -434,24 +506,24 @@ TXT / DOCX / SRT / VTT / CSV support.
     id="button"
     type="submit"
 >
-🚀 Start Processing
+    🚀 Start Processing
 </button>
 
 </form>
 
 
-<div id="status">
-Ready...
-</div>
+<div id="status"></div>
 
 
 <a
     id="download"
     class="download hidden"
 >
-📥 Download Translated ZIP
+    📥 Download Translated ZIP
 </a>
 
+
+</div>
 
 </div>
 
@@ -477,19 +549,28 @@ form.addEventListener(
 
         event.preventDefault();
 
+
         button.disabled = true;
+
+        button.textContent =
+            "⏳ Processing...";
+
+        status.style.display =
+            "block";
+
+        status.textContent =
+            "⏳ File processing လုပ်နေပါတယ်...";
 
         download.classList.add(
             "hidden"
         );
 
-        status.textContent =
-            "⏳ Processing...";
 
         try {
 
             const formData =
                 new FormData(form);
+
 
             const response =
                 await fetch(
@@ -500,21 +581,46 @@ form.addEventListener(
                     }
                 );
 
+
+            const contentType =
+                response.headers.get(
+                    "content-type"
+                ) || "";
+
+
+            if (
+                !contentType.includes(
+                    "application/json"
+                )
+            ) {
+
+                const raw =
+                    await response.text();
+
+                throw new Error(
+                    "Server HTTP " +
+                    response.status +
+                    "\n\n" +
+                    raw.substring(
+                        0,
+                        3000
+                    )
+                );
+            }
+
+
             const result =
                 await response.json();
 
+
             if (!response.ok) {
 
-    const raw =
-        await response.text();
+                throw new Error(
+                    result.error ||
+                    "Server Error"
+                );
+            }
 
-    throw new Error(
-        "HTTP " +
-        response.status +
-        "\n\n" +
-        raw.substring(0, 3000)
-    );
-}
 
             if (!result.success) {
 
@@ -524,29 +630,42 @@ form.addEventListener(
                 );
             }
 
+
             status.textContent =
-                result.message;
+                result.message ||
+                "✅ Processing ပြီးပါပြီ";
 
-            download.href =
-                result.download_url;
 
-            download.classList.remove(
-                "hidden"
-            );
+            if (
+                result.download_url
+            ) {
+
+                download.href =
+                    result.download_url;
+
+                download.classList.remove(
+                    "hidden"
+                );
+            }
 
         }
+
 
         catch (error) {
 
             status.textContent =
-                "❌ Error:\n" +
+                "❌ ERROR\n\n" +
                 error.message;
 
         }
 
+
         finally {
 
             button.disabled = false;
+
+            button.textContent =
+                "🚀 Start Processing";
 
         }
 
@@ -561,6 +680,10 @@ form.addEventListener(
 """
 
 
+# =========================================================
+# LOGIN REQUIRED
+# =========================================================
+
 def login_required(function):
 
     @wraps(function)
@@ -569,6 +692,14 @@ def login_required(function):
         if not session.get(
             "logged_in"
         ):
+
+            if request.path == "/process":
+
+                return jsonify({
+                    "success": False,
+                    "error":
+                        "Login session expired. Please login again."
+                }), 401
 
             return redirect(
                 url_for("login")
@@ -582,6 +713,10 @@ def login_required(function):
     return decorated
 
 
+# =========================================================
+# LOGIN
+# =========================================================
+
 @app.route(
     "/login",
     methods=["GET", "POST"]
@@ -590,17 +725,21 @@ def login():
 
     error = None
 
+
     if request.method == "POST":
 
-        username = request.form.get(
-            "username",
-            ""
-        )
+        username =
+            request.form.get(
+                "username",
+                ""
+            ).strip()
 
-        password = request.form.get(
-            "password",
-            ""
-        )
+        password =
+            request.form.get(
+                "password",
+                ""
+            )
+
 
         if (
             username == USERNAME
@@ -613,16 +752,20 @@ def login():
                 url_for("home")
             )
 
-        error = (
-            "Username သို့မဟုတ် "
-            "Password မှားနေပါတယ်"
-        )
+
+        error =
+            "Username သို့မဟုတ် Password မှားနေပါတယ်"
+
 
     return render_template_string(
         LOGIN_HTML,
         error=error
     )
 
+
+# =========================================================
+# LOGOUT
+# =========================================================
 
 @app.route("/logout")
 def logout():
@@ -634,6 +777,10 @@ def logout():
     )
 
 
+# =========================================================
+# HOME
+# =========================================================
+
 @app.route("/")
 @login_required
 def home():
@@ -643,7 +790,13 @@ def home():
     )
 
 
+# =========================================================
+# PDF TO IMAGES
+# =========================================================
+
 def pdf_to_images(path):
+
+    pages = []
 
     document = fitz.open(path)
 
@@ -652,7 +805,10 @@ def pdf_to_images(path):
         for page in document:
 
             pixmap = page.get_pixmap(
-                matrix=fitz.Matrix(1.5, 1.5),
+                matrix=fitz.Matrix(
+                    1.5,
+                    1.5
+                ),
                 alpha=False
             )
 
@@ -665,24 +821,216 @@ def pdf_to_images(path):
                 pixmap.samples
             )
 
-            yield image
+            pages.append(
+                image
+            )
 
     finally:
 
         document.close()
 
+    return pages
+
+
+# =========================================================
+# IMAGE LOADER
+# =========================================================
+
 def load_input_images(path):
 
     lower = path.lower()
 
+
     if lower.endswith(".pdf"):
 
-        return pdf_to_images(path)
+        return pdf_to_images(
+            path
+        )
+
 
     return [
-        Image.open(path).convert("RGB")
+        Image.open(path).convert(
+            "RGB"
+        )
     ]
 
+
+# =========================================================
+# TRANSLATION FILE READER
+# =========================================================
+
+def read_translation_file(path):
+
+    if not path:
+
+        return ""
+
+
+    lower =
+        path.lower()
+
+
+    # TXT
+    if lower.endswith(".txt"):
+
+        with open(
+            path,
+            "r",
+            encoding="utf-8-sig",
+            errors="replace"
+        ) as file:
+
+            return file.read()
+
+
+    # DOCX
+    if lower.endswith(".docx"):
+
+        try:
+
+            from docx import Document
+
+        except ImportError:
+
+            raise RuntimeError(
+                "python-docx မရှိပါ။ "
+                "requirements.txt ထဲမှာ "
+                "python-docx ထည့်ပြီး redeploy လုပ်ပါ။"
+            )
+
+
+        document =
+            Document(path)
+
+
+        lines = []
+
+
+        for paragraph in document.paragraphs:
+
+            text =
+                paragraph.text.strip()
+
+            if text:
+
+                lines.append(
+                    text
+                )
+
+
+        return "\n".join(
+            lines
+        )
+
+
+    raise ValueError(
+        "Translation file က TXT သို့မဟုတ် DOCX ဖြစ်ရပါမယ်။"
+    )
+
+
+# =========================================================
+# TRANSLATION PARSER
+# =========================================================
+
+def parse_translations(text):
+
+    if not text:
+
+        return []
+
+
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip()
+    ]
+
+
+# =========================================================
+# MATCH TRANSLATION
+# =========================================================
+
+def match_translations(
+    boxes,
+    translations
+):
+
+    result = []
+
+
+    for index, box in enumerate(
+        boxes
+    ):
+
+        item = dict(box)
+
+
+        if index < len(
+            translations
+        ):
+
+            item["myanmar"] =
+                translations[index]
+
+        else:
+
+            item["myanmar"] = ""
+
+
+        result.append(
+            item
+        )
+
+
+    return result
+
+
+# =========================================================
+# ZIP CREATOR
+# =========================================================
+
+def create_zip(images):
+
+    buffer =
+        io.BytesIO()
+
+
+    with zipfile.ZipFile(
+        buffer,
+        "w",
+        zipfile.ZIP_DEFLATED
+    ) as archive:
+
+
+        for index, image in enumerate(
+            images,
+            start=1
+        ):
+
+            image_buffer =
+                io.BytesIO()
+
+
+            image.save(
+                image_buffer,
+                format="PNG"
+            )
+
+
+            archive.writestr(
+                f"page_{index:04d}.png",
+                image_buffer.getvalue()
+            )
+
+
+    buffer.seek(0)
+
+    return buffer
+
+
+# =========================================================
+# PROCESS
+# =========================================================
 
 @app.route(
     "/process",
@@ -691,83 +1039,159 @@ def load_input_images(path):
 @login_required
 def process():
 
-    uploaded = request.files.get(
-        "file"
-    )
-
-    translation_upload = request.files.get(
-        "translation_file"
-    )
-
-    translation_text = request.form.get(
-        "translation",
-        ""
-    )
-
-
-    if uploaded is None:
-
-        return {
-            "success": False,
-            "error": "Manhwa file မတွေ့ပါ"
-        }, 400
-
-
-    if not uploaded.filename:
-
-        return {
-            "success": False,
-            "error": "Manhwa file name မရှိပါ"
-        }, 400
-
-
-    filename = uploaded.filename.lower()
-
-    allowed_images = (
-        ".pdf",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".webp"
-    )
-
-
-    if not filename.endswith(
-        allowed_images
-    ):
-
-        return {
-            "success": False,
-            "error": (
-                "PDF/JPG/PNG/WEBP ပဲ "
-                "တင်ပါ"
-            )
-        }, 400
-
-
-    temp_dir = tempfile.mkdtemp(
-        prefix="manhwa_"
-    )
-
-
-    input_path = os.path.join(
-        temp_dir,
-        os.path.basename(
-            uploaded.filename
-        )
-    )
+    temp_dir = None
 
 
     try:
+
+        uploaded =
+            request.files.get(
+                "file"
+            )
+
+
+        translation_upload =
+            request.files.get(
+                "translation_file"
+            )
+
+
+        translation_text =
+            request.form.get(
+                "translation",
+                ""
+            )
+
+
+        if uploaded is None:
+
+            return jsonify({
+                "success": False,
+                "error":
+                    "Manhwa file မတွေ့ပါ"
+            }), 400
+
+
+        if not uploaded.filename:
+
+            return jsonify({
+                "success": False,
+                "error":
+                    "Manhwa file name မရှိပါ"
+            }), 400
+
+
+        filename =
+            uploaded.filename.lower()
+
+
+        allowed = (
+            ".pdf",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp"
+        )
+
+
+        if not filename.endswith(
+            allowed
+        ):
+
+            return jsonify({
+                "success": False,
+                "error":
+                    "PDF/JPG/PNG/WEBP ပဲ တင်ပါ"
+            }), 400
+
+
+        temp_dir =
+            tempfile.mkdtemp(
+                prefix="manhwa_"
+            )
+
+
+        input_path =
+            os.path.join(
+                temp_dir,
+                os.path.basename(
+                    uploaded.filename
+                )
+            )
+
 
         uploaded.save(
             input_path
         )
 
 
-        pages = load_input_images(
-            input_path
-        )
+        # -------------------------------------------------
+        # Read translation file
+        # -------------------------------------------------
+
+        if (
+            translation_upload
+            and translation_upload.filename
+        ):
+
+            translation_filename =
+                translation_upload.filename.lower()
+
+
+            if not translation_filename.endswith(
+                (".txt", ".docx")
+            ):
+
+                return jsonify({
+                    "success": False,
+                    "error":
+                        "Translation file က TXT သို့မဟုတ် DOCX ပဲ ဖြစ်ရပါမယ်။"
+                }), 400
+
+
+            translation_path =
+                os.path.join(
+                    temp_dir,
+                    os.path.basename(
+                        translation_upload.filename
+                    )
+                )
+
+
+            translation_upload.save(
+                translation_path
+            )
+
+
+            translation_text =
+                read_translation_file(
+                    translation_path
+                )
+
+
+        translations =
+            parse_translations(
+                translation_text
+            )
+
+
+        if not translations:
+
+            return jsonify({
+                "success": False,
+                "error":
+                    "Translation စာ မတွေ့ပါ။ TXT/DOCX တင်ပါ သို့မဟုတ် စာကို box ထဲရေးပါ။"
+            }), 400
+
+
+        # -------------------------------------------------
+        # Load pages
+        # -------------------------------------------------
+
+        pages =
+            load_input_images(
+                input_path
+            )
 
 
         if not pages:
@@ -777,85 +1201,45 @@ def process():
             )
 
 
-        translations = []
-
-
-        # Translation file has priority.
-        if (
-            translation_upload is not None
-            and translation_upload.filename
-        ):
-
-            translation_filename = (
-                translation_upload.filename
-            )
-
-            translation_path = os.path.join(
-                temp_dir,
-                os.path.basename(
-                    translation_filename
-                )
-            )
-
-
-            translation_upload.save(
-                translation_path
-            )
-
-
-            translations = (
-                load_translation_file(
-                    translation_path
-                )
-            )
-
-
-        # If no translation file,
-        # use pasted text.
-        if not translations:
-
-            translations = (
-                load_translation(
-                    translation_text
-                )
-            )
-
-
-        if not translations:
-
-            raise ValueError(
-                "Translation file သို့မဟုတ် "
-                "translation text ထည့်ပါ"
-            )
-
-
         output_pages = []
 
         total_boxes = 0
 
 
-        for page in pages:
+        # -------------------------------------------------
+        # Process each page
+        # -------------------------------------------------
 
-            boxes = detect_text(
-                page
-            )
+        for page_index, page in enumerate(
+            pages,
+            start=1
+        ):
+
+
+            boxes =
+                detect_text(
+                    page
+                )
+
 
             total_boxes += len(
                 boxes
             )
 
 
-            matched = match_translation(
-                boxes,
-                translations
-            )
+            matched =
+                match_translations(
+                    boxes,
+                    translations
+                )
 
 
-            output = replace_text(
-                page,
-                matched,
-                translations
-            )
+            output =
+                replace_text(
+                    page,
+                    matched,
+                    translations
+                )
 
 
             output_pages.append(
@@ -863,15 +1247,21 @@ def process():
             )
 
 
-        zip_buffer = create_zip(
-            output_pages
-        )
+        # -------------------------------------------------
+        # Create ZIP
+        # -------------------------------------------------
+
+        zip_buffer =
+            create_zip(
+                output_pages
+            )
 
 
-        output_path = os.path.join(
-            temp_dir,
-            "translated_manhwa.zip"
-        )
+        output_path =
+            os.path.join(
+                temp_dir,
+                "translated_manhwa.zip"
+            )
 
 
         with open(
@@ -880,9 +1270,13 @@ def process():
         ) as output_file:
 
             output_file.write(
-                zip_buffer.read()
+                zip_buffer.getvalue()
             )
 
+
+        # -------------------------------------------------
+        # Save download path
+        # -------------------------------------------------
 
         app.config.setdefault(
             "OUTPUTS",
@@ -890,44 +1284,50 @@ def process():
         )
 
 
-        token = os.path.basename(
-            temp_dir
-        )
+        token =
+            os.path.basename(
+                temp_dir
+            )
 
 
-        app.config["OUTPUTS"][token] = (
+        app.config["OUTPUTS"][token] =
             output_path
-        )
 
 
-        return {
+        return jsonify({
 
             "success": True,
 
-            "message": (
-                "✅ Processing ပြီးပါပြီ!\n\n"
-                f"Pages: {len(output_pages)}\n"
-                f"Text boxes: {total_boxes}\n"
-                f"Translation lines: "
-                f"{len(translations)}\n\n"
-                "ZIP download လုပ်နိုင်ပါပြီ။"
-            ),
+            "message":
+                (
+                    "✅ Processing ပြီးပါပြီ!\n\n"
+                    f"Pages: {len(output_pages)}\n"
+                    f"Text boxes: {total_boxes}\n"
+                    f"Translation lines: {len(translations)}\n\n"
+                    "ZIP download လုပ်နိုင်ပါပြီ။"
+                ),
 
             "download_url":
                 f"/download/{token}"
-        }
+
+        })
 
 
     except Exception as error:
 
-        return {
+        return jsonify({
 
             "success": False,
 
-            "error": str(error)
+            "error":
+                f"{type(error).__name__}: {str(error)}"
 
-        }, 500
+        }), 500
 
+
+# =========================================================
+# DOWNLOAD
+# =========================================================
 
 @app.route(
     "/download/<token>"
@@ -935,15 +1335,17 @@ def process():
 @login_required
 def download(token):
 
-    outputs = app.config.get(
-        "OUTPUTS",
-        {}
-    )
+    outputs =
+        app.config.get(
+            "OUTPUTS",
+            {}
+        )
 
 
-    path = outputs.get(
-        token
-    )
+    path =
+        outputs.get(
+            token
+        )
 
 
     if not path:
@@ -954,7 +1356,9 @@ def download(token):
         )
 
 
-    if not os.path.exists(path):
+    if not os.path.exists(
+        path
+    ):
 
         return (
             "Download file မရှိတော့ပါ",
@@ -976,17 +1380,36 @@ def download(token):
     )
 
 
+# =========================================================
+# HEALTH CHECK
+# =========================================================
+
+@app.route("/health")
+def health():
+
+    return jsonify({
+        "status": "ok"
+    })
+
+
+# =========================================================
+# START
+# =========================================================
+
 if __name__ == "__main__":
 
-    port = int(
-        os.environ.get(
-            "PORT",
-            "10000"
+    port =
+        int(
+            os.environ.get(
+                "PORT",
+                "8080"
+            )
         )
-    )
 
 
     app.run(
+
         host="0.0.0.0",
+
         port=port
     )
