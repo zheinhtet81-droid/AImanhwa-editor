@@ -1,15 +1,19 @@
+```python
 import os
 import tempfile
+from functools import wraps
 
 from flask import (
     Flask,
     request,
     render_template_string,
-    send_file
+    send_file,
+    session,
+    redirect,
+    url_for
 )
 
 import fitz
-
 from PIL import Image
 
 from modules.ocr import detect_text
@@ -22,6 +26,179 @@ from modules.exporter import create_zip
 
 
 app = Flask(__name__)
+
+app.secret_key = os.environ.get(
+    "APP_SECRET",
+    "change-this-secret"
+)
+
+USERNAME = os.environ.get(
+    "APP_USERNAME",
+    "admin"
+)
+
+PASSWORD = os.environ.get(
+    "APP_PASSWORD",
+    "change-this-password"
+)
+
+
+LOGIN_HTML = r"""
+<!DOCTYPE html>
+
+<html lang="my">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
+
+<title>Private Login</title>
+
+<style>
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 20px;
+
+    min-height: 100vh;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    background: #0f172a;
+    color: white;
+
+    font-family:
+        Arial,
+        sans-serif;
+}
+
+.box {
+    width: 100%;
+    max-width: 420px;
+
+    padding: 25px;
+
+    background: #1e293b;
+
+    border-radius: 16px;
+
+    border: 1px solid #334155;
+}
+
+h1 {
+    text-align: center;
+    color: #38bdf8;
+}
+
+input {
+    width: 100%;
+
+    padding: 13px;
+
+    margin-top: 10px;
+
+    border-radius: 8px;
+
+    border: 1px solid #475569;
+
+    background: #0f172a;
+
+    color: white;
+
+    font-size: 16px;
+}
+
+button {
+    width: 100%;
+
+    padding: 13px;
+
+    margin-top: 18px;
+
+    border: 0;
+
+    border-radius: 8px;
+
+    background: #0284c7;
+
+    color: white;
+
+    font-size: 16px;
+
+    font-weight: bold;
+}
+
+.error {
+    margin-top: 15px;
+
+    padding: 10px;
+
+    background: #7f1d1d;
+
+    border-radius: 8px;
+
+    text-align: center;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="box">
+
+<h1>🔐 Private App</h1>
+
+<form method="POST">
+
+<input
+    type="text"
+    name="username"
+    placeholder="Username"
+    autocomplete="username"
+    required
+>
+
+<input
+    type="password"
+    name="password"
+    placeholder="Password"
+    autocomplete="current-password"
+    required
+>
+
+<button type="submit">
+    Login
+</button>
+
+</form>
+
+{% if error %}
+
+<div class="error">
+    {{ error }}
+</div>
+
+{% endif %}
+
+</div>
+
+</body>
+
+</html>
+"""
 
 
 HTML = r"""
@@ -60,7 +237,6 @@ body {
 
     font-family:
         Arial,
-        "Pyidaungsu",
         sans-serif;
 }
 
@@ -84,6 +260,19 @@ h1 {
     text-align: center;
 
     color: #38bdf8;
+}
+
+.logout {
+
+    display: block;
+
+    text-align: right;
+
+    color: #f87171;
+
+    text-decoration: none;
+
+    margin-bottom: 15px;
 }
 
 label {
@@ -199,6 +388,13 @@ button:disabled {
 
 <div class="container">
 
+<a
+    class="logout"
+    href="/logout"
+>
+    Logout
+</a>
+
 <h1>
 🎨 AI Manhwa Myanmar Translator
 </h1>
@@ -274,7 +470,9 @@ form.addEventListener(
 
         button.disabled = true;
 
-        download.classList.add("hidden");
+        download.classList.add(
+            "hidden"
+        );
 
         status.textContent =
             "⏳ Processing...";
@@ -351,7 +549,77 @@ form.addEventListener(
 """
 
 
+def login_required(function):
+
+    @wraps(function)
+    def decorated(*args, **kwargs):
+
+        if not session.get(
+            "logged_in"
+        ):
+            return redirect(
+                url_for("login")
+            )
+
+        return function(
+            *args,
+            **kwargs
+        )
+
+    return decorated
+
+
+@app.route(
+    "/login",
+    methods=["GET", "POST"]
+)
+def login():
+
+    error = None
+
+    if request.method == "POST":
+
+        username = request.form.get(
+            "username",
+            ""
+        )
+
+        password = request.form.get(
+            "password",
+            ""
+        )
+
+        if (
+            username == USERNAME
+            and password == PASSWORD
+        ):
+
+            session["logged_in"] = True
+
+            return redirect(
+                url_for("home")
+            )
+
+        error = "Username သို့မဟုတ် Password မှားနေပါတယ်"
+
+    return render_template_string(
+        LOGIN_HTML,
+        error=error
+    )
+
+
+@app.route("/logout")
+def logout():
+
+    session.clear()
+
+    return redirect(
+        url_for("login")
+    )
+
+
 @app.route("/")
+@login_required
 def home():
 
     return render_template_string(
@@ -409,6 +677,7 @@ def load_input_images(path):
     "/process",
     methods=["POST"]
 )
+@login_required
 def process():
 
     uploaded = request.files.get(
@@ -438,7 +707,6 @@ def process():
 
     filename = uploaded.filename.lower()
 
-
     allowed = (
         ".pdf",
         ".png",
@@ -453,7 +721,9 @@ def process():
 
         return {
             "success": False,
-            "error": "PDF/JPG/PNG/WEBP ပဲ တင်ပါ"
+            "error": (
+                "PDF/JPG/PNG/WEBP ပဲ တင်ပါ"
+            )
         }, 400
 
 
@@ -463,7 +733,9 @@ def process():
 
     input_path = os.path.join(
         temp_dir,
-        uploaded.filename
+        os.path.basename(
+            uploaded.filename
+        )
     )
 
 
@@ -473,11 +745,9 @@ def process():
             input_path
         )
 
-
         pages = load_input_images(
             input_path
         )
-
 
         if not pages:
 
@@ -485,23 +755,18 @@ def process():
                 "Page မတွေ့ပါ"
             )
 
-
         translations = (
             load_translation(
                 translation_text
             )
         )
 
-
         output_pages = []
 
         total_boxes = 0
 
 
-        for page_index, page in enumerate(
-            pages,
-            start=1
-        ):
+        for page in pages:
 
             boxes = detect_text(
                 page
@@ -511,19 +776,16 @@ def process():
                 boxes
             )
 
-
             matched = match_translation(
                 boxes,
                 translations
             )
-
 
             output = replace_text(
                 page,
                 matched,
                 translations
             )
-
 
             output_pages.append(
                 output
@@ -551,7 +813,6 @@ def process():
             )
 
 
-        # Store path for the download route.
         app.config.setdefault(
             "OUTPUTS",
             {}
@@ -567,6 +828,7 @@ def process():
 
 
         return {
+
             "success": True,
 
             "message": (
@@ -584,14 +846,18 @@ def process():
     except Exception as error:
 
         return {
+
             "success": False,
+
             "error": str(error)
+
         }, 500
 
 
 @app.route(
     "/download/<token>"
 )
+@login_required
 def download(token):
 
     outputs = app.config.get(
@@ -621,10 +887,16 @@ def download(token):
 
 
     return send_file(
+
         path,
+
         as_attachment=True,
-        download_name="translated_manhwa.zip",
-        mimetype="application/zip"
+
+        download_name=
+            "translated_manhwa.zip",
+
+        mimetype=
+            "application/zip"
     )
 
 
@@ -640,4 +912,5 @@ if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
         port=port
-  )
+    )
+```
