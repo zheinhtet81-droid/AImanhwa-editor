@@ -1,4 +1,3 @@
-```python
 import csv
 import re
 
@@ -193,4 +192,3 @@ def match_translation(boxes, translations):
         result.append(item)
 
     return result
-```
