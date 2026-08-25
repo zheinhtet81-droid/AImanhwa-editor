@@ -1232,14 +1232,13 @@ def process():
                     translations
                 )
 
-
+            # ========== ဒီနေရာကို ပြင်ထားတယ် ==========
             output =
                 replace_text(
                     page,
-                    matched,
-                    translations
+                    matched   # ← translations ကို ဖယ်လိုက်တယ်
                 )
-
+            # ===========================================
 
             output_pages.append(
                 output
