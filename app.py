@@ -733,8 +733,7 @@ def login():
                 ""
             ).strip()
 
-        password =
-            request.form.get(
+        password = request.form.get(
                 "password",
                 ""
             )
@@ -752,8 +751,7 @@ def login():
             )
 
 
-        error =
-            "Username သို့မဟုတ် Password မှားနေပါတယ်"
+        error = "Username သို့မဟုတ် Password မှားနေပါတယ်"
 
 
     return render_template_string(
@@ -865,8 +863,7 @@ def read_translation_file(path):
         return ""
 
 
-    lower =
-        path.lower()
+    lower = path.lower()
 
 
     # TXT
@@ -898,8 +895,7 @@ def read_translation_file(path):
             )
 
 
-        document =
-            Document(path)
+        document = Document(path)
 
 
         lines = []
@@ -907,8 +903,7 @@ def read_translation_file(path):
 
         for paragraph in document.paragraphs:
 
-            text =
-                paragraph.text.strip()
+            text = paragraph.text.strip()
 
             if text:
 
@@ -968,8 +963,7 @@ def match_translations(
             translations
         ):
 
-            item["myanmar"] =
-                translations[index]
+            item["myanmar"] = translations[index]
 
         else:
 
@@ -990,8 +984,7 @@ def match_translations(
 
 def create_zip(images):
 
-    buffer =
-        io.BytesIO()
+    buffer = io.BytesIO()
 
 
     with zipfile.ZipFile(
@@ -1006,8 +999,7 @@ def create_zip(images):
             start=1
         ):
 
-            image_buffer =
-                io.BytesIO()
+            image_buffer = io.BytesIO()
 
 
             image.save(
@@ -1043,20 +1035,17 @@ def process():
 
     try:
 
-        uploaded =
-            request.files.get(
+        uploaded = request.files.get(
                 "file"
             )
 
 
-        translation_upload =
-            request.files.get(
+        translation_upload = request.files.get(
                 "translation_file"
             )
 
 
-        translation_text =
-            request.form.get(
+        translation_text = request.form.get(
                 "translation",
                 ""
             )
@@ -1080,8 +1069,7 @@ def process():
             }), 400
 
 
-        filename =
-            uploaded.filename.lower()
+        filename = uploaded.filename.lower()
 
 
         allowed = (
@@ -1104,14 +1092,12 @@ def process():
             }), 400
 
 
-        temp_dir =
-            tempfile.mkdtemp(
+        temp_dir = tempfile.mkdtemp(
                 prefix="manhwa_"
             )
 
 
-        input_path =
-            os.path.join(
+        input_path = os.path.join(
                 temp_dir,
                 os.path.basename(
                     uploaded.filename
@@ -1133,8 +1119,7 @@ def process():
             and translation_upload.filename
         ):
 
-            translation_filename =
-                translation_upload.filename.lower()
+            translation_filename = translation_upload.filename.lower()
 
 
             if not translation_filename.endswith(
@@ -1148,8 +1133,7 @@ def process():
                 }), 400
 
 
-            translation_path =
-                os.path.join(
+            translation_path = os.path.join(
                     temp_dir,
                     os.path.basename(
                         translation_upload.filename
@@ -1162,14 +1146,12 @@ def process():
             )
 
 
-            translation_text =
-                read_translation_file(
+            translation_text = read_translation_file(
                     translation_path
                 )
 
 
-        translations =
-            parse_translations(
+        translations = parse_translations(
                 translation_text
             )
 
@@ -1187,8 +1169,7 @@ def process():
         # Load pages
         # -------------------------------------------------
 
-        pages =
-            load_input_images(
+        pages = load_input_images(
                 input_path
             )
 
@@ -1215,8 +1196,7 @@ def process():
         ):
 
 
-            boxes =
-                detect_text(
+            boxes = detect_text(
                     page
                 )
 
@@ -1226,17 +1206,15 @@ def process():
             )
 
 
-            matched =
-                match_translations(
+            matched = match_translations(
                     boxes,
                     translations
                 )
 
             # ========== ဒီနေရာကို ပြင်ထားတယ် ==========
-            output =
-                replace_text(
+            output = replace_text(
                     page,
-                    matched   # ← translations ကို ဖယ်လိုက်တယ်
+                    matched
                 )
             # ===========================================
 
@@ -1249,14 +1227,12 @@ def process():
         # Create ZIP
         # -------------------------------------------------
 
-        zip_buffer =
-            create_zip(
+        zip_buffer = create_zip(
                 output_pages
             )
 
 
-        output_path =
-            os.path.join(
+        output_path = os.path.join(
                 temp_dir,
                 "translated_manhwa.zip"
             )
@@ -1282,14 +1258,12 @@ def process():
         )
 
 
-        token =
-            os.path.basename(
+        token = os.path.basename(
                 temp_dir
             )
 
 
-        app.config["OUTPUTS"][token] =
-            output_path
+        app.config["OUTPUTS"][token] = output_path
 
 
         return jsonify({
@@ -1333,15 +1307,13 @@ def process():
 @login_required
 def download(token):
 
-    outputs =
-        app.config.get(
+    outputs = app.config.get(
             "OUTPUTS",
             {}
         )
 
 
-    path =
-        outputs.get(
+    path = outputs.get(
             token
         )
 
@@ -1396,8 +1368,7 @@ def health():
 
 if __name__ == "__main__":
 
-    port =
-        int(
+    port = int(
             os.environ.get(
                 "PORT",
                 "8080"
